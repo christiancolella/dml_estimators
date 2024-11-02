@@ -1,20 +1,23 @@
 import numpy as np
 import pandas as pd
-import scipy
+import doubleml as dml
+
+from scipy.stats import norm
 
 from typing import Union
-
+    
 class ATTDID:
-    seed = None
+    data = None
+    model = None
     
-    def set_seed(self, seed: Union[None, int]):
-        self.seed = seed
-        return self
-    
-    def generate(self, n_obs: int):
+    def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        np.random.seed(self.seed)
+        #
+        # Population treatment effect for this DGP is 218.5625
+        #
+        
+        np.random.seed(seed)
         
         df = pd.DataFrame([], columns=['y', 'a', 'x1', 'x2', 'x3', 'x4', 't'], dtype=np.float64)
         
@@ -44,20 +47,35 @@ class ATTDID:
                 y = (1 if i == 0 else 2) * freg(x) + v(x, a) + np.random.normal(0, 1)
                 
                 df.loc[len(df.index)] = np.array([y, a, x[0], x[1], x[2], x[3], t])
-                
-        return df
-
-class LATE:
-    seed = None
-    
-    def set_seed(self, seed: Union[None, int]):
-        self.seed = seed
+        
+        self.data = dml.DoubleMLData(df, y_col='y', d_cols='a', x_cols=['x1', 'x2', 'x3', 'x4'], t_col='t')
+        
         return self
     
-    def generate(self, n_obs: int):
+    def setup_model(self, regressor, classifier, n_folds: int):
+        assert self.data != None
+        
+        self.model = dml.DoubleMLDID(self.data,
+                                     ml_g=regressor,
+                                     ml_m=classifier,
+                                     n_folds=n_folds)
+        
+        return self
+    
+    def fit_model(self):
+        assert self.model != None
+        
+        self.model.fit()
+        return self
+    
+class LATE:
+    data = None
+    model = None
+    
+    def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        np.random.seed(self.seed)
+        np.random.seed(seed)
         
         df = pd.DataFrame([], columns=['y', 'z', 'd', 'x'], dtype=np.float64)
         
@@ -76,14 +94,34 @@ class LATE:
             y_1 = xi_1 + (xi_3 if d_1 == 1 and d_0 == 1 else 0) + (xi_4 if d_1 == 0 and d_0 == 0 else 0)
             y_0 = xi_2 + (xi_3 if d_1 == 1 and d_0 == 1 else 0) + (xi_4 if d_1 == 0 and d_0 == 0 else 0)
             
-            z = np.random.binomial(1, scipy.stats.norm.cdf(x[i] - 0.5))
+            z = np.random.binomial(1, norm.cdf(x[i] - 0.5))
             d = z * d_1 + (1 - z) * d_0
             
             y = d * y_1 + (1 - d) * y_0
             
             df.loc[len(df.index)] = np.array([y, z, d, x[i]])
-            
-        print(df.head(5))
-        return df
+        
+        self.data = dml.DoubleMLData(df,
+                                     y_col='y',
+                                     d_cols='d',
+                                     x_cols='x',
+                                     z_cols='z')
+        
+        return self
     
-LATE().set_seed(123).generate(10)
+    def setup_model(self, regressor, classifier, n_folds: int):
+        assert self.data != None
+        
+        self.model = dml.DoubleMLIIVM(self.data,
+                                      ml_g=regressor,
+                                      ml_m=classifier,
+                                      ml_r=classifier,
+                                      n_folds=n_folds)
+        
+        return self
+    
+    def fit_model(self):
+        assert self.model != None
+        
+        self.model.fit()
+        return self
