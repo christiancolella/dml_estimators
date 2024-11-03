@@ -2,13 +2,19 @@ import numpy as np
 import pandas as pd
 import doubleml as dml
 
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from scipy.stats import norm
 
 from typing import Union
     
 class ATTDID:
     data = None
-    model = None
+    
+    regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
+    classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
+    
+    dml1 = None
+    dml2 = None
     
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
@@ -19,7 +25,7 @@ class ATTDID:
         
         np.random.seed(seed)
         
-        df = pd.DataFrame([], columns=['y', 'a', 'x1', 'x2', 'x3', 'x4', 't'], dtype=np.float64)
+        df = pd.DataFrame([], columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4', 't'], dtype=np.float64)
         
         def fps(x: list):
             assert len(x) == 4
@@ -48,36 +54,57 @@ class ATTDID:
                 
                 df.loc[len(df.index)] = np.array([y, a, x[0], x[1], x[2], x[3], t])
         
-        self.data = dml.DoubleMLData(df, y_col='y', d_cols='a', x_cols=['x1', 'x2', 'x3', 'x4'], t_col='t')
+        self.data = dml.DoubleMLData(df, y_col='Y', d_cols='A', x_cols=['X1', 'X2', 'X3', 'X4'], t_col='t')
         
         return self
     
-    def setup_model(self, regressor, classifier, n_folds: int):
+    def setup_dml1(self, n_folds: int):
         assert self.data != None
         
-        self.model = dml.DoubleMLDID(self.data,
-                                     ml_g=regressor,
-                                     ml_m=classifier,
-                                     n_folds=n_folds)
+        self.dml1 = dml.DoubleMLDID(self.data,
+                                    ml_g=self.regressor,
+                                    ml_m=self.classifier,
+                                    n_folds=n_folds, 
+                                    dml_procedure='dml1')
+    
+    def setup_dml2(self, n_folds: int):
+        assert self.data != None
+        
+        self.dml2 = dml.DoubleMLDID(self.data,
+                                    ml_g=self.regressor,
+                                    ml_m=self.classifier,
+                                    n_folds=n_folds, 
+                                    dml_procedure='dml2')
         
         return self
     
-    def fit_model(self):
-        assert self.model != None
+    def fit_dml1(self):
+        assert self.dml1 != None
         
-        self.model.fit()
+        self.dml1.fit()
+        return self
+    
+    def fit_dml2(self):
+        assert self.dml2 != None
+        
+        self.dml2.fit()
         return self
     
 class LATE:
     data = None
-    model = None
+    
+    regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
+    classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
+    
+    dml1 = None
+    dml2 = None
     
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
         np.random.seed(seed)
         
-        df = pd.DataFrame([], columns=['y', 'z', 'd', 'x'], dtype=np.float64)
+        df = pd.DataFrame([], columns=['Y', 'Z', 'D', 'X'], dtype=np.float64)
         
         x = np.random.uniform(0, 1, n_obs).astype(np.float64)
         v = np.random.normal(0, 1, n_obs).astype(np.float64)
@@ -102,26 +129,45 @@ class LATE:
             df.loc[len(df.index)] = np.array([y, z, d, x[i]])
         
         self.data = dml.DoubleMLData(df,
-                                     y_col='y',
-                                     d_cols='d',
-                                     x_cols='x',
-                                     z_cols='z')
+                                     y_col='Y',
+                                     d_cols='D',
+                                     x_cols='X',
+                                     z_cols='Z')
         
         return self
     
-    def setup_model(self, regressor, classifier, n_folds: int):
+    def setup_dml1(self, n_folds: int):
         assert self.data != None
         
-        self.model = dml.DoubleMLIIVM(self.data,
-                                      ml_g=regressor,
-                                      ml_m=classifier,
-                                      ml_r=classifier,
-                                      n_folds=n_folds)
+        self.dml1 = dml.DoubleMLIIVM(self.data,
+                                     ml_g=self.regressor,
+                                     ml_m=self.classifier,
+                                     ml_r=self.classifier,
+                                     n_folds=n_folds,
+                                     dml_procedure='dml1')
         
         return self
     
-    def fit_model(self):
-        assert self.model != None
+    def setup_dml2(self, n_folds: int):
+        assert self.data != None
         
-        self.model.fit()
+        self.dml2 = dml.DoubleMLIIVM(self.data,
+                                     ml_g=self.regressor,
+                                     ml_m=self.classifier,
+                                     ml_r=self.classifier,
+                                     n_folds=n_folds,
+                                     dml_procedure='dml2')
+        
+        return self
+    
+    def fit_dml1(self):
+        assert self.dml1 != None
+        
+        self.dml1.fit()
+        return self
+    
+    def fit_dml2(self):
+        assert self.dml2 != None
+        
+        self.dml2.fit()
         return self
