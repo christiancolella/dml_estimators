@@ -19,13 +19,8 @@ class ATTDID:
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        #
-        # Population treatment effect for this DGP is 218.5625
-        #
-        
-        np.random.seed(seed)
-        
         df = pd.DataFrame([], columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4'], dtype=np.float64)
+        np.random.seed(seed)
         
         def f_ps(x: list):
             assert len(x) == 4
@@ -126,9 +121,8 @@ class LATE:
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        np.random.seed(seed)
-        
         df = pd.DataFrame([], columns=['Y', 'Z', 'D', 'X'], dtype=np.float64)
+        np.random.seed(seed)
         
         x = np.random.uniform(0, 1, n_obs).astype(np.float64)
         v = np.random.normal(0, 1, n_obs).astype(np.float64)
