@@ -25,36 +25,37 @@ class ATTDID:
         
         np.random.seed(seed)
         
-        df = pd.DataFrame([], columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4', 't'], dtype=np.float64)
+        df = pd.DataFrame([], columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4'], dtype=np.float64)
         
-        def fps(x: list):
+        def f_ps(x: list):
             assert len(x) == 4
             return 0.25 * (-x[0] + 0.5 * x[1] - 0.25 * x[2] - 0.1 * x[3])
         
         def p(x: list):
             assert len(x) == 4
-            return np.exp(fps(x)) / (1 + np.exp(fps(x)))
+            return np.exp(f_ps(x)) / (1 + np.exp(f_ps(x)))
         
-        def freg(x: list):
+        def f_reg(x: list):
             assert len(x) == 4
             return 210 + 6.85 * x[0] + 3.425 * (x[1] + x[2] + x[3])
         
         def v(x: list, a: np.float64):
             assert len(x) == 4
-            return a * freg(x) + np.random.normal(0, 1)
+            return a * f_reg(x) + np.random.normal(0, 1)
         
         X = np.random.uniform(0, 1, (n_obs, 4)).astype(np.float64)
-        
+            
         for x in X:
             a = np.random.binomial(1, p(x))
             
-            for i in range(3):
-                t = 0 if i == 0 else 1
-                y = (1 if i == 0 else 2) * freg(x) + v(x, a) + np.random.normal(0, 1)
-                
-                df.loc[len(df.index)] = np.array([y, a, x[0], x[1], x[2], x[3], t])
+            y0 = f_reg(x) + v(x, a) + np.random.normal(0, 1)
+            y1 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
+            
+            y = y1 - y0
+                        
+            df.loc[len(df.index)] = np.array([y, a, x[0], x[1], x[2], x[3]])
         
-        self.data = dml.DoubleMLData(df, y_col='Y', d_cols='A', x_cols=['X1', 'X2', 'X3', 'X4'], t_col='t')
+        self.data = dml.DoubleMLData(df, y_col='Y', d_cols='A', x_cols=['X1', 'X2', 'X3', 'X4'])
         
         return self
     
@@ -89,6 +90,29 @@ class ATTDID:
         
         self.dml2.fit()
         return self
+    
+    def run_simulation(self, i: int, k: int, dml_procedure: str, n_obs: int, seed: Union[None, int]):
+        if dml_procedure == 'dml1':
+            self.generate_data(n_obs=n_obs, seed=seed)
+            self.setup_dml1(n_folds=k)
+            self.fit_dml1()
+            
+            bias = self.dml1.coef[0]
+            mse = (self.dml1.se[0] ** 2) * (n_obs - 1)
+            
+            return i, (bias, mse)
+    
+        else:
+            assert dml_procedure == 'dml2'
+            
+            self.generate_data(n_obs=n_obs, seed=seed)
+            self.setup_dml2(n_folds=k)
+            self.fit_dml2()
+            
+            bias = self.dml2.coef[0]
+            mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
+            
+            return i, (bias, mse)
     
 class LATE:
     data = None
@@ -171,3 +195,26 @@ class LATE:
         
         self.dml2.fit()
         return self
+    
+    def run_simulation(self, i: int, k: int, dml_procedure: str, n_obs: int, seed: Union[None, int]):
+        if dml_procedure == 'dml1':
+            self.generate_data(n_obs=n_obs, seed=seed)
+            self.setup_dml1(n_folds=k)
+            self.fit_dml1()
+            
+            bias = self.dml1.coef[0]
+            mse = (self.dml1.se[0] ** 2) * (n_obs - 1)
+            
+            return i, (bias, mse)
+    
+        else:
+            assert dml_procedure == 'dml2'
+            
+            self.generate_data(n_obs=n_obs, seed=seed)
+            self.setup_dml2(n_folds=k)
+            self.fit_dml2()
+            
+            bias = self.dml2.coef[0]
+            mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
+            
+            return i, (bias, mse)
