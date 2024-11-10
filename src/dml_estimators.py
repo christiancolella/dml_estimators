@@ -5,17 +5,39 @@ import doubleml as dml
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from scipy.stats import norm
 
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 from typing import Union
-    
+
+
+#
+# ATTDID
+#
+# Provides methods that implement the DGP for ATT-DID, set up and fit the
+# DID model provided by the DoubleML library using both DML1 and DML2
+# procedures, and report on simulations for different k-values
+#
 class ATTDID:
     data = None
     
+    #
+    # Use random forest as the machine learning technique for estimation and
+    # classification
+    #
     regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
     classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
     
     dml1 = None
     dml2 = None
     
+    #
+    # generate_data
+    #
+    # Generates n_obs of data according to the process defined in section 5.1
+    # of Velez (2024) referenced from Sant'Anna and Zhao (2020), stores
+    # dataset in the object's data property
+    #
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
@@ -54,6 +76,12 @@ class ATTDID:
         
         return self
     
+    #
+    # setup_dml1
+    #
+    # Initializes the DID model from DoubleML using the DML1 procedure and the
+    # data stored in the object's data property
+    #
     def setup_dml1(self, n_folds: int):
         assert self.data != None
         
@@ -63,6 +91,12 @@ class ATTDID:
                                     n_folds=n_folds, 
                                     dml_procedure='dml1')
     
+    #
+    # setup_dml2
+    #
+    # Initializes the DID model from DoubleML using the DML2 procedure and the
+    # data stored in the object's data property
+    #
     def setup_dml2(self, n_folds: int):
         assert self.data != None
         
@@ -74,18 +108,35 @@ class ATTDID:
         
         return self
     
+    #
+    # fit_dml1
+    #
+    # Fits the model stored in the object's dml1 property
+    #
     def fit_dml1(self):
         assert self.dml1 != None
         
         self.dml1.fit()
         return self
     
+    
+    #
+    # fit_dml2
+    #
+    # Fits the model stored in the object's dml2 property
+    #
     def fit_dml2(self):
         assert self.dml2 != None
         
         self.dml2.fit()
         return self
     
+    #
+    # run_simulation
+    #
+    # Execute a single step of the simulation--generates data, fits the DID
+    # model, and returns the bias and MSE of the individual simulation
+    #
     def run_simulation(self, i: int, k: int, dml_procedure: str, n_obs: int, seed: Union[None, int]):
         if dml_procedure == 'dml1':
             self.generate_data(n_obs=n_obs, seed=seed)
@@ -108,16 +159,110 @@ class ATTDID:
             mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
             
             return i, (bias, mse)
-    
+        
+    #
+    # simulate
+    #
+    # Runs simulations of ATT-DID using both DML1 and DML2 for each given K
+    # and returns a pd.DataFrame containing bias, MSE, and runtime
+    #
+    def simulate(self, K: list, n_obs: int, n_sims: int) -> pd.DataFrame:
+        summary = []                                                                # Initialize array for reporting
+
+        #
+        # Fit model with DML1 procedure
+        #
+        for k in K:
+            simulation_results = np.zeros((n_sims, 2))                              # Allocate array of simulation results
+            
+            np.random.seed(123)                                                     # Set seed for generating seeds below
+            seeds = np.random.randint(0, n_sims ** 2, n_sims)                       # Initialize array of seeds for simulations
+            
+            dml1_start = time.time()
+            
+            #
+            # Run simulations in parallel
+            #
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(self.run_simulation, i, k, 'dml1', n_obs, seeds[i]) for i in range(n_sims)]
+
+                for future in as_completed(futures):
+                    i, result = future.result()
+                    simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+            dml1_end = time.time()
+            
+            #
+            # Append simulation results for this value of K to the data frame of reports
+            #
+            dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
+            summary.append(dml1_summary)
+
+        #
+        # Fit model with DML2 procedure
+        #
+        for k in K:
+            simulation_results = np.zeros((n_sims, 2))                              # Allocate array of simulation results
+            
+            np.random.seed(234)                                                     # Set seed for generating seeds below
+            seeds = np.random.randint(0, n_sims ** 2, n_sims)                       # Initialize array of seeds for simulations
+            
+            dml2_start = time.time()
+            
+            #
+            # Run simulations in parallel
+            #
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(self.run_simulation, i, k, 'dml2', n_obs, seeds[i]) for i in range(n_sims)]
+
+                for future in as_completed(futures):
+                    i, result = future.result()
+                    simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+            dml2_end = time.time()
+            
+            #
+            # Append simulation results for this value of K to the data frame of reports
+            #
+            dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
+            summary.append(dml2_summary)
+
+        #
+        # Format results as pandas DataFrame
+        #
+        df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+        df.set_index(['procedure', 'n_folds'], inplace=True)
+        
+        return df
+
+
+#
+# LATE
+#
+# Provides methods that implement the DGP for LATE, set up and fit the
+# IIVM model provided by the DoubleML library using both DML1 and DML2
+# procedures, and report on simulations for different k-values
+#
 class LATE:
     data = None
     
+    #
+    # Use random forest as the machine learning technique for estimation and
+    # classification
+    #
     regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
     classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
     
     dml1 = None
     dml2 = None
     
+    #
+    # generate_data
+    #
+    # Generates n_obs of data according to the process defined in section 5.2
+    # of Velez (2024) referenced from Hong and Nekipelov (2010), stores
+    # dataset in the object's data property
+    #
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
@@ -154,6 +299,12 @@ class LATE:
         
         return self
     
+    #
+    # setup_dml1
+    #
+    # Initializes the IIVM model from DoubleML using the DML1 procedure and the
+    # data stored in the object's data property
+    #
     def setup_dml1(self, n_folds: int):
         assert self.data != None
         
@@ -166,6 +317,12 @@ class LATE:
         
         return self
     
+    #
+    # setup_dml2
+    #
+    # Initializes the IIVM model from DoubleML using the DML2 procedure and the
+    # data stored in the object's data property
+    #
     def setup_dml2(self, n_folds: int):
         assert self.data != None
         
@@ -178,18 +335,35 @@ class LATE:
         
         return self
     
+    #
+    # fit_dml1
+    #
+    # Fits the model stored in the object's dml1 property
+    #
     def fit_dml1(self):
         assert self.dml1 != None
         
         self.dml1.fit()
         return self
     
+    #
+    # fit_dml2
+    #
+    # Fits the model stored in the object's dml2 property
+    #
     def fit_dml2(self):
         assert self.dml2 != None
         
         self.dml2.fit()
         return self
     
+    
+    #
+    # run_simulation
+    #
+    # Execute a single step of the simulation--generates data, fits the IIVM
+    # model, and returns the bias and MSE of the individual simulation
+    #
     def run_simulation(self, i: int, k: int, dml_procedure: str, n_obs: int, seed: Union[None, int]):
         if dml_procedure == 'dml1':
             self.generate_data(n_obs=n_obs, seed=seed)
@@ -212,3 +386,72 @@ class LATE:
             mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
             
             return i, (bias, mse)
+        
+    #
+    # simulate
+    #
+    # Runs simulations of LATE using both DML1 and DML2 for each given K
+    # and returns a pd.DataFrame containing bias, MSE, and runtime
+    #
+    def simulate(self, K: list, n_obs: int, n_sims: int) -> pd.DataFrame:
+        summary = []                                                                # Initialize array for reporting
+
+        #
+        # Fit model with DML1 procedure
+        #
+        for k in K:
+            simulation_results = np.zeros((n_sims, 2))                              # Allocate array of simulation results
+            
+            np.random.seed(123)                                                     # Set seed for generating seeds below
+            seeds = np.random.randint(0, n_sims ** 2, n_sims)                       # Initialize array of seeds for simulations
+            
+            dml1_start = time.time()
+            
+            #
+            # Run simulations in parallel
+            #
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(self.run_simulation, i, k, 'dml1', n_obs, seeds[i]) for i in range(n_sims)]
+
+                for future in as_completed(futures):
+                    i, result = future.result()
+                    simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+            dml1_end = time.time()
+            
+            dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
+            summary.append(dml1_summary)
+
+        #
+        # Fit model with DML2 procedure
+        #
+        for k in K:
+            simulation_results = np.zeros((n_sims, 2))                              # Allocate array of simulation results
+            
+            np.random.seed(456)                                                     # Set seed for generating seeds below
+            seeds = np.random.randint(0, n_sims ** 2, n_sims)                       # Initialize array of seeds for simulations
+            
+            dml2_start = time.time()
+            
+            #
+            # Run simulations in parallel
+            #
+            with ProcessPoolExecutor() as executor:
+                futures = [executor.submit(self.run_simulation, i, k, 'dml2', n_obs, seeds[i]) for i in range(n_sims)]
+
+                for future in as_completed(futures):
+                    i, result = future.result()
+                    simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+            dml2_end = time.time()
+            
+            dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
+            summary.append(dml2_summary)
+
+        #
+        # Format results as pandas DataFrame
+        #
+        df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+        df.set_index(['procedure', 'n_folds'], inplace=True)
+        
+        return df
