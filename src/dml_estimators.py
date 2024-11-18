@@ -42,41 +42,45 @@ class ATTDID:
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        df = pd.DataFrame([], columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4'], dtype=np.float64)
         np.random.seed(seed)
         
-        def f_ps(x: list):
-            assert len(x) == 4
-            return 0.25 * (-x[0] + 0.5 * x[1] - 0.25 * x[2] - 0.1 * x[3])
+        def f_ps(X: np.ndarray):
+            assert np.shape(X)[1] == 4
+            
+            T = 0.25 * np.array([-1, 0.5, -0.25, -0.1])
+            return np.matmul(X, T)
         
-        def p(x: list):
-            assert len(x) == 4
-            return np.exp(f_ps(x)) / (1 + np.exp(f_ps(x)))
+        def p(X: np.ndarray):
+            assert np.shape(X)[1] == 4
+            
+            E = np.exp(f_ps(X))
+            return np.divide(E, 1 + E)
         
-        def f_reg(x: list):
-            assert len(x) == 4
-            return 210 + 6.85 * x[0] + 3.425 * (x[1] + x[2] + x[3])
+        def f_reg(X: np.ndarray):
+            assert np.shape(X)[1] == 4
+            
+            T = np.array([6.85, 3.425, 3.425, 3.425], dtype=np.float64)
+            return 210 + np.matmul(X, T)
         
-        def v(x: list, a: np.float64):
-            assert len(x) == 4
-            return a * f_reg(x) + np.random.normal(0, 1)
+        def v(X: np.ndarray, A: np.ndarray):
+            epsilon = np.random.normal(0, 1, n_obs)
+            return np.dot(A, f_reg(X)) + epsilon
         
         X = np.random.uniform(0, 1, (n_obs, 4)).astype(np.float64)
-            
-        for x in X:
-            a = np.random.binomial(1, p(x))
-            
-            y0 = f_reg(x) + v(x, a) + np.random.normal(0, 1)
-            
-            y10 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
-            y11 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
-            
-            y1 = a * y11 + (1 - a) * y10
-            
-            y = y1 - y0
-                        
-            df.loc[len(df.index)] = np.array([y, a, x[0], x[1], x[2], x[3]])
+        A = np.random.binomial(1, p(X)).astype(np.float64)
         
+        Y_0 = f_reg(X) + v(X, A) + np.random.normal(0, 1, n_obs)
+        
+        Y_11 = 2 * f_reg(X) + v(X, A) + np.random.normal(0, 1, n_obs)
+        Y_10 = 2 * f_reg(X) + v(X, A) + np.random.normal(0, 1, n_obs)
+        Y_1 = np.multiply(A, Y_11) + np.multiply(1 - A, Y_10)
+        
+        Y = Y_1 - Y_0
+        
+        Y = np.reshape(Y, (n_obs, 1))
+        A = np.reshape(A, (n_obs, 1))
+        
+        df = pd.DataFrame(np.concat([Y, A, X], axis=-1), columns=['Y', 'A', 'X1', 'X2', 'X3', 'X4'], dtype=np.float64)
         self.data = dml.DoubleMLData(df, y_col='Y', d_cols='A', x_cols=['X1', 'X2', 'X3', 'X4'])
         
         return self
@@ -176,7 +180,19 @@ class ATTDID:
     # for each K and each procedure
     #
     def simulate(self, K: list, n_obs: int, n_sims: int, verbose: bool = False) -> pd.DataFrame:
-        summary = []                                                                # Initialize array for reporting
+        
+        #
+        # Initialize data frame of results with appropriate number of columns
+        # and data types
+        #
+        n_cols = 2 * len(K) * (n_sims if verbose else 1)
+        df = pd.DataFrame({
+            'a': pd.Series(np.zeros(n_cols, dtype=np.str_)),
+            'b': pd.Series(np.zeros(n_cols, dtype=np.int8)),
+            'c': pd.Series(np.zeros(n_cols, dtype=np.int8 if verbose else np.float64)),
+            'd': pd.Series(np.zeros(n_cols, dtype=np.float64)),
+            'e': pd.Series(np.zeros(n_cols, dtype=np.float64))
+            })
 
         #
         # Fit model with DML1 procedure
@@ -204,18 +220,19 @@ class ATTDID:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
+            start_row = K.index(k) * (n_sims if verbose else 1)
+            end_row = start_row + n_sims
+            
             if verbose:
-                index = [['dml1', k, i] for i in range(n_sims)]
-                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
-                
-                if len(summary) == 0:
-                    summary = k_summary
-                else:
-                    summary = np.concat([summary, k_summary])
+                df.iloc[start_row:end_row, 0] = 'dml1'
+                df.iloc[start_row:end_row, 1] = k
+                df.iloc[start_row:end_row, 2] = np.arange(n_sims).astype(np.int8)
+                df.iloc[start_row:end_row, 3:] = simulation_results
                     
             else:
-                dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
-                summary.append(dml1_summary)
+                df.iloc[start_row, 0] = 'dml1'
+                df.iloc[start_row, 1] = k
+                df.iloc[start_row, 2:] = np.concat([np.average(simulation_results, axis=0), np.array([dml1_end - dml1_start])], axis=-1)
 
         #
         # Fit model with DML2 procedure
@@ -243,29 +260,33 @@ class ATTDID:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
+            start_row = (len(K) + K.index(k)) * (n_sims if verbose else 1)
+            end_row = start_row + n_sims
+            
             if verbose:
-                index = [['dml2', k, i] for i in range(n_sims)]
-                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
-                
-                if len(summary) == 0:
-                    summary = k_summary
-                else:
-                    summary = np.concat([summary, k_summary])
+                df.iloc[start_row:end_row, 0] = 'dml2'
+                df.iloc[start_row:end_row, 1] = k
+                df.iloc[start_row:end_row, 2] = np.arange(n_sims).astype(np.int8)
+                df.iloc[start_row:end_row, 3:] = simulation_results
                     
             else:
-                dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
-                summary.append(dml2_summary)
+                df.iloc[start_row, 0] = 'dml2'
+                df.iloc[start_row, 1] = k
+                df.iloc[start_row, 2:] = np.concat([np.average(simulation_results, axis=0), np.array([dml2_end - dml2_start])], axis=-1)
 
         #
         # Format results as pandas DataFrame
         #
         if verbose:
-            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'sim_index', 'bias', 'mse'])
+            df.columns = ['procedure', 'n_folds', 'sim_index', 'bias', 'mse']
             df.set_index(['procedure', 'n_folds', 'sim_index'], inplace=True)
             
             return df
         else:
-            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+            df.iloc[:, 2] = np.sqrt(n_obs) * np.abs(df.iloc[:, 2])
+            df.iloc[:, 3] = n_obs * df.iloc[:, 3]
+            
+            df.columns = ['procedure', 'n_folds', '√(n_obs)*|bias|', 'n_obs*mse', 'runtime']
             df.set_index(['procedure', 'n_folds'], inplace=True)
             
             return df
@@ -300,36 +321,32 @@ class LATE:
     def generate_data(self, n_obs: int, seed: Union[None, int]):
         assert n_obs > 0
         
-        df = pd.DataFrame([], columns=['Y', 'Z', 'D', 'X'], dtype=np.float64)
         np.random.seed(seed)
         
-        x = np.random.uniform(0, 1, n_obs).astype(np.float64)
-        v = np.random.normal(0, 1, n_obs).astype(np.float64)
+        X = np.random.uniform(0, 1, n_obs).astype(np.float64)
+        V = np.random.normal(0, 1, n_obs).astype(np.float64)
         
-        for i in range(n_obs):
-            d_1 = 1 if x[i] + 0.5 >= v[i] else 0
-            d_0 = 1 if x[i] - 0.5 >= v[i] else 0
-            
-            xi_1 = np.random.poisson(np.exp(1 + x[i] / 2))
-            xi_2 = np.random.poisson(np.exp(x[i] / 2))
-            xi_3 = np.random.poisson(2)
-            xi_4 = np.random.poisson(1)
-            
-            y_1 = xi_1 + (xi_3 if d_1 == 1 and d_0 == 1 else 0) + (xi_4 if d_1 == 0 and d_0 == 0 else 0)
-            y_0 = xi_2 + (xi_3 if d_1 == 1 and d_0 == 1 else 0) + (xi_4 if d_1 == 0 and d_0 == 0 else 0)
-            
-            z = np.random.binomial(1, norm.cdf(x[i] - 0.5))
-            d = z * d_1 + (1 - z) * d_0
-            
-            y = d * y_1 + (1 - d) * y_0
-            
-            df.loc[len(df.index)] = np.array([y, z, d, x[i]])
+        D_1 = np.where(X + 0.5 >= V, 1, 0)
+        D_0 = np.where(X - 0.5 >= V, 1, 0)
         
-        self.data = dml.DoubleMLData(df,
-                                     y_col='Y',
-                                     d_cols='D',
-                                     x_cols='X',
-                                     z_cols='Z')
+        lambdas = np.array([np.exp(1 + X / 2), np.exp(X / 2), 2 * np.ones((n_obs)), np.ones(n_obs)]).T
+        XI = np.random.poisson(lambdas).astype(np.float64)
+        
+        Y_1 = XI[:, 0] + np.where(D_1 * D_0 == 1, XI[:, 2], 0) + np.where(D_1 * D_0 == 0, XI[:, 3], 0)
+        Y_0 = XI[:, 1] + np.where(D_1 * D_0 == 1, XI[:, 2], 0) + np.where(D_1 * D_0 == 0, XI[:, 3], 0)
+        
+        Z = np.random.binomial(1, norm.cdf(X - 0.5)).astype(np.float64)
+        D = Z * D_1 + (1 - Z) * D_0
+        
+        Y = D * Y_1 + (1 - D) * Y_0
+        
+        Y = np.reshape(Y, (n_obs, 1))
+        Z = np.reshape(Z, (n_obs, 1))
+        X = np.reshape(X, (n_obs, 1))
+        D = np.reshape(D, (n_obs, 1))
+        
+        df = pd.DataFrame(np.concat([Y, Z, D, X], axis=-1), columns=['Y', 'Z', 'D', 'X'], dtype=np.float64)
+        self.data = dml.DoubleMLData(df, y_col='Y', d_cols='D', x_cols='X', z_cols='Z')
         
         return self
     
@@ -432,7 +449,19 @@ class LATE:
     # for each K and each procedure
     #
     def simulate(self, K: list, n_obs: int, n_sims: int, verbose: bool = False) -> pd.DataFrame:
-        summary = []                                                                # Initialize array for reporting
+        
+        #
+        # Initialize data frame of results with appropriate number of columns
+        # and data types
+        #
+        n_cols = 2 * len(K) * (n_sims if verbose else 1)
+        df = pd.DataFrame({
+            'a': pd.Series(np.zeros(n_cols, dtype=np.str_)),
+            'b': pd.Series(np.zeros(n_cols, dtype=np.int8)),
+            'c': pd.Series(np.zeros(n_cols, dtype=np.int8 if verbose else np.float64)),
+            'd': pd.Series(np.zeros(n_cols, dtype=np.float64)),
+            'e': pd.Series(np.zeros(n_cols, dtype=np.float64))
+            })
 
         #
         # Fit model with DML1 procedure
@@ -460,18 +489,19 @@ class LATE:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
+            start_row = K.index(k) * (n_sims if verbose else 1)
+            end_row = start_row + n_sims
+            
             if verbose:
-                index = [['dml1', k, i] for i in range(n_sims)]
-                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
-                
-                if len(summary) == 0:
-                    summary = k_summary
-                else:
-                    summary = np.concat([summary, k_summary])
+                df.iloc[start_row:end_row, 0] = 'dml1'
+                df.iloc[start_row:end_row, 1] = k
+                df.iloc[start_row:end_row, 2] = np.arange(n_sims).astype(np.int8)
+                df.iloc[start_row:end_row, 3:] = simulation_results
                     
             else:
-                dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
-                summary.append(dml1_summary)
+                df.iloc[start_row, 0] = 'dml1'
+                df.iloc[start_row, 1] = k
+                df.iloc[start_row, 2:] = np.concat([np.average(simulation_results, axis=0), np.array([dml1_end - dml1_start])], axis=-1)
 
         #
         # Fit model with DML2 procedure
@@ -499,29 +529,33 @@ class LATE:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
+            start_row = (len(K) + K.index(k)) * (n_sims if verbose else 1)
+            end_row = start_row + n_sims
+            
             if verbose:
-                index = [['dml2', k, i] for i in range(n_sims)]
-                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
-                
-                if len(summary) == 0:
-                    summary = k_summary
-                else:
-                    summary = np.concat([summary, k_summary])
+                df.iloc[start_row:end_row, 0] = 'dml2'
+                df.iloc[start_row:end_row, 1] = k
+                df.iloc[start_row:end_row, 2] = np.arange(n_sims).astype(np.int8)
+                df.iloc[start_row:end_row, 3:] = simulation_results
                     
             else:
-                dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
-                summary.append(dml2_summary)
+                df.iloc[start_row, 0] = 'dml2'
+                df.iloc[start_row, 1] = k
+                df.iloc[start_row, 2:] = np.concat([np.average(simulation_results, axis=0), np.array([dml2_end - dml2_start])], axis=-1)
 
         #
         # Format results as pandas DataFrame
         #
         if verbose:
-            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'sim_index', 'bias', 'mse'])
+            df.columns = ['procedure', 'n_folds', 'sim_index', 'bias', 'mse']
             df.set_index(['procedure', 'n_folds', 'sim_index'], inplace=True)
             
             return df
         else:
-            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+            df.iloc[:, 2] = np.sqrt(n_obs) * np.abs(df.iloc[:, 2])
+            df.iloc[:, 3] = n_obs * df.iloc[:, 3]
+            
+            df.columns = ['procedure', 'n_folds', '√(n_obs)*|bias|', 'n_obs*mse', 'runtime']
             df.set_index(['procedure', 'n_folds'], inplace=True)
             
             return df

@@ -81,12 +81,12 @@ def main():
     #
     # Run the demo with a summarized output
     #
-    # demo_summarized()
+    demo_summarized()
     
     #
     # Run the demo with a verbose output
     #
-    demo_verbose()
+    # demo_verbose()
     
 
 #
