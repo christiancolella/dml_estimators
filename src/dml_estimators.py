@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
-import doubleml as dml
+from scipy.stats import norm
 
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from scipy.stats import norm
+from sklearn.base import clone
+
+import doubleml as dml
 
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -19,17 +21,16 @@ from typing import Union
 # procedures, and report on simulations for different k-values
 #
 class ATTDID:
+    regressor = None
+    classifier = None
+    
     data = None
-    
-    #
-    # Use random forest as the machine learning technique for estimation and
-    # classification
-    #
-    regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
-    classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
-    
     dml1 = None
     dml2 = None
+    
+    def __init__(self, regressor, classifier):
+        self.regressor = regressor
+        self.classifier = classifier
     
     #
     # generate_data
@@ -66,7 +67,11 @@ class ATTDID:
             a = np.random.binomial(1, p(x))
             
             y0 = f_reg(x) + v(x, a) + np.random.normal(0, 1)
-            y1 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
+            
+            y10 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
+            y11 = 2 * f_reg(x) + v(x, a) + np.random.normal(0, 1)
+            
+            y1 = a * y11 + (1 - a) * y10
             
             y = y1 - y0
                         
@@ -86,8 +91,8 @@ class ATTDID:
         assert self.data != None
         
         self.dml1 = dml.DoubleMLDID(self.data,
-                                    ml_g=self.regressor,
-                                    ml_m=self.classifier,
+                                    ml_g=clone(self.regressor),
+                                    ml_m=clone(self.classifier),
                                     n_folds=n_folds, 
                                     dml_procedure='dml1')
     
@@ -101,8 +106,8 @@ class ATTDID:
         assert self.data != None
         
         self.dml2 = dml.DoubleMLDID(self.data,
-                                    ml_g=self.regressor,
-                                    ml_m=self.classifier,
+                                    ml_g=clone(self.regressor),
+                                    ml_m=clone(self.classifier),
                                     n_folds=n_folds, 
                                     dml_procedure='dml2')
         
@@ -144,7 +149,7 @@ class ATTDID:
             self.fit_dml1()
             
             bias = self.dml1.coef[0]
-            mse = (self.dml1.se[0] ** 2) * (n_obs - 1)
+            mse = self.dml1.se[0] ** 2
             
             return i, (bias, mse)
     
@@ -156,7 +161,7 @@ class ATTDID:
             self.fit_dml2()
             
             bias = self.dml2.coef[0]
-            mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
+            mse = self.dml2.se[0] ** 2
             
             return i, (bias, mse)
         
@@ -166,7 +171,11 @@ class ATTDID:
     # Runs simulations of ATT-DID using both DML1 and DML2 for each given K
     # and returns a pd.DataFrame containing bias, MSE, and runtime
     #
-    def simulate(self, K: list, n_obs: int, n_sims: int) -> pd.DataFrame:
+    # If verbose is set to true, outputs the results for each individual
+    # simulation with runtime omitted. Otherwise, outputs the average result
+    # for each K and each procedure
+    #
+    def simulate(self, K: list, n_obs: int, n_sims: int, verbose: bool = False) -> pd.DataFrame:
         summary = []                                                                # Initialize array for reporting
 
         #
@@ -195,8 +204,18 @@ class ATTDID:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
-            dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
-            summary.append(dml1_summary)
+            if verbose:
+                index = [['dml1', k, i] for i in range(n_sims)]
+                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
+                
+                if len(summary) == 0:
+                    summary = k_summary
+                else:
+                    summary = np.concat([summary, k_summary])
+                    
+            else:
+                dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
+                summary.append(dml1_summary)
 
         #
         # Fit model with DML2 procedure
@@ -224,16 +243,32 @@ class ATTDID:
             #
             # Append simulation results for this value of K to the data frame of reports
             #
-            dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
-            summary.append(dml2_summary)
+            if verbose:
+                index = [['dml2', k, i] for i in range(n_sims)]
+                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
+                
+                if len(summary) == 0:
+                    summary = k_summary
+                else:
+                    summary = np.concat([summary, k_summary])
+                    
+            else:
+                dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
+                summary.append(dml2_summary)
 
         #
         # Format results as pandas DataFrame
         #
-        df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
-        df.set_index(['procedure', 'n_folds'], inplace=True)
-        
-        return df
+        if verbose:
+            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'sim_index', 'bias', 'mse'])
+            df.set_index(['procedure', 'n_folds', 'sim_index'], inplace=True)
+            
+            return df
+        else:
+            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+            df.set_index(['procedure', 'n_folds'], inplace=True)
+            
+            return df
 
 
 #
@@ -244,17 +279,16 @@ class ATTDID:
 # procedures, and report on simulations for different k-values
 #
 class LATE:
+    regressor = None
+    classifier = None
+    
     data = None
-    
-    #
-    # Use random forest as the machine learning technique for estimation and
-    # classification
-    #
-    regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
-    classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
-    
     dml1 = None
     dml2 = None
+    
+    def __init__(self, regressor, classifier):
+        self.regressor = regressor
+        self.classifier = classifier
     
     #
     # generate_data
@@ -276,7 +310,7 @@ class LATE:
             d_1 = 1 if x[i] + 0.5 >= v[i] else 0
             d_0 = 1 if x[i] - 0.5 >= v[i] else 0
             
-            xi_1 = np.random.poisson(np.exp(x[i] / 2))
+            xi_1 = np.random.poisson(np.exp(1 + x[i] / 2))
             xi_2 = np.random.poisson(np.exp(x[i] / 2))
             xi_3 = np.random.poisson(2)
             xi_4 = np.random.poisson(1)
@@ -309,9 +343,9 @@ class LATE:
         assert self.data != None
         
         self.dml1 = dml.DoubleMLIIVM(self.data,
-                                     ml_g=self.regressor,
-                                     ml_m=self.classifier,
-                                     ml_r=self.classifier,
+                                     ml_g=clone(self.regressor),
+                                     ml_m=clone(self.classifier),
+                                     ml_r=clone(self.classifier),
                                      n_folds=n_folds,
                                      dml_procedure='dml1')
         
@@ -327,9 +361,9 @@ class LATE:
         assert self.data != None
         
         self.dml2 = dml.DoubleMLIIVM(self.data,
-                                     ml_g=self.regressor,
-                                     ml_m=self.classifier,
-                                     ml_r=self.classifier,
+                                     ml_g=clone(self.regressor),
+                                     ml_m=clone(self.classifier),
+                                     ml_r=clone(self.classifier),
                                      n_folds=n_folds,
                                      dml_procedure='dml2')
         
@@ -371,7 +405,7 @@ class LATE:
             self.fit_dml1()
             
             bias = self.dml1.coef[0]
-            mse = (self.dml1.se[0] ** 2) * (n_obs - 1)
+            mse = self.dml1.se[0] ** 2
             
             return i, (bias, mse)
     
@@ -383,7 +417,7 @@ class LATE:
             self.fit_dml2()
             
             bias = self.dml2.coef[0]
-            mse = (self.dml2.se[0] ** 2) * (n_obs - 1)
+            mse = self.dml2.se[0] ** 2
             
             return i, (bias, mse)
         
@@ -393,7 +427,11 @@ class LATE:
     # Runs simulations of LATE using both DML1 and DML2 for each given K
     # and returns a pd.DataFrame containing bias, MSE, and runtime
     #
-    def simulate(self, K: list, n_obs: int, n_sims: int) -> pd.DataFrame:
+    # If verbose is set to true, outputs the results for each individual
+    # simulation with runtime omitted. Otherwise, outputs the average result
+    # for each K and each procedure
+    #
+    def simulate(self, K: list, n_obs: int, n_sims: int, verbose: bool = False) -> pd.DataFrame:
         summary = []                                                                # Initialize array for reporting
 
         #
@@ -419,8 +457,21 @@ class LATE:
                     
             dml1_end = time.time()
             
-            dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
-            summary.append(dml1_summary)
+            #
+            # Append simulation results for this value of K to the data frame of reports
+            #
+            if verbose:
+                index = [['dml1', k, i] for i in range(n_sims)]
+                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
+                
+                if len(summary) == 0:
+                    summary = k_summary
+                else:
+                    summary = np.concat([summary, k_summary])
+                    
+            else:
+                dml1_summary = ['dml1', k] + list(np.average(simulation_results, axis=0)) + [dml1_end - dml1_start]
+                summary.append(dml1_summary)
 
         #
         # Fit model with DML2 procedure
@@ -445,13 +496,32 @@ class LATE:
                     
             dml2_end = time.time()
             
-            dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
-            summary.append(dml2_summary)
+            #
+            # Append simulation results for this value of K to the data frame of reports
+            #
+            if verbose:
+                index = [['dml2', k, i] for i in range(n_sims)]
+                k_summary = np.concat([index.copy(), simulation_results], axis=-1)
+                
+                if len(summary) == 0:
+                    summary = k_summary
+                else:
+                    summary = np.concat([summary, k_summary])
+                    
+            else:
+                dml2_summary = ['dml2', k] + list(np.average(simulation_results, axis=0)) + [dml2_end - dml2_start]
+                summary.append(dml2_summary)
 
         #
         # Format results as pandas DataFrame
         #
-        df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
-        df.set_index(['procedure', 'n_folds'], inplace=True)
-        
-        return df
+        if verbose:
+            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'sim_index', 'bias', 'mse'])
+            df.set_index(['procedure', 'n_folds', 'sim_index'], inplace=True)
+            
+            return df
+        else:
+            df = pd.DataFrame(summary, columns=['procedure', 'n_folds', 'bias', 'mse', 'runtime'])
+            df.set_index(['procedure', 'n_folds'], inplace=True)
+            
+            return df
