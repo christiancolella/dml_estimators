@@ -2,4 +2,4 @@ numpy
 pandas
 scipy
 scikit-learn
-doubleml==0.7.1
+doubleml<=0.7.1
