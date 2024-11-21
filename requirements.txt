@@ -1,5 +1,5 @@
 numpy
 pandas
 scipy
-sklearn
+scikit-learn
 doubleml==0.7.1
