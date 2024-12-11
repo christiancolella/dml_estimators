@@ -1,12 +1,13 @@
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 
 from abc import ABC, abstractmethod
 from typing import Union
+
+from dml_estimators.utils import ProgressBar
 
 class Module:
     def __init__(self):
@@ -160,6 +161,9 @@ class Module:
             
             dml1_start = time.time()
             
+            progress_bar = ProgressBar(f'DML1 (K={k})...', n_items=n_sims)
+            n_completed = 0
+            
             #
             # Run simulations in parallel
             #
@@ -169,6 +173,9 @@ class Module:
                 for future in as_completed(futures):
                     i, result = future.result()
                     simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+                    n_completed += 1
+                    progress_bar.print(n_completed)
                     
             dml1_end = time.time()
             
@@ -200,6 +207,9 @@ class Module:
             
             dml2_start = time.time()
             
+            progress_bar = ProgressBar(f'DML2 (K={k})...', n_items=n_sims)
+            n_completed = 0
+            
             #
             # Run simulations in parallel
             #
@@ -209,6 +219,9 @@ class Module:
                 for future in as_completed(futures):
                     i, result = future.result()
                     simulation_results[i] = result                                  # Insert individual results at correct index as completed
+                    
+                    n_completed += 1
+                    progress_bar.print(n_completed)
                     
             dml2_end = time.time()
             

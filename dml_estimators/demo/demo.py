@@ -33,11 +33,10 @@ def simulate_att_did(outfile: Union[None, str] = None, verbose: bool = False):
     #
     # Run simulations and report
     #
+    print(f'\n[ATT-DID] n_obs={n_obs} n_sims={n_sims}\n')
     results = model.simulate(K, n_obs, n_sims, verbose=verbose)
     
-    print(f'\n[ATT-DID] n_obs={n_obs} n_sims={n_sims}\n')                       # Print ATT-DID results to console
-    print(results)
-    print('\n')
+    print(f'\n{results}\n')                                                     # Print ATT-DID results to console
     
     if outfile != None:
         results.to_csv(outfile)                                                 # Output ATT-DID results to csv
@@ -65,17 +64,16 @@ def simulate_late(outfile: Union[None, str] = None, verbose: bool = False):
     # Initialize model objects
     #
     regressor = RandomForestRegressor(n_estimators=300, max_depth=7, max_features=3, min_samples_leaf=3)
-    classifier = RandomForestClassifier(n_estimators=100, max_depth=5, max_features=4, min_samples_leaf=7)
-    model = ATTDID(regressor=regressor, classifier=classifier)
+    classifier = RandomForestClassifier(n_estimators=100, max_depth=3, max_features=4, min_samples_leaf=9)
+    model = LATE(regressor=regressor, classifier=classifier)
     
     #
     # Run simulations and report
     #
+    print(f'\n[LATE] n_obs={n_obs} n_sims={n_sims}\n')
     results = model.simulate(K, n_obs, n_sims, verbose=verbose)
     
-    print(f'\n[ATT-DID] n_obs={n_obs} n_sims={n_sims}\n')                       # Print LATE results to console
-    print(results)
-    print('\n')
+    print(f'\n{results}\n')                                                     # Print LATE results to console
     
     if outfile != None:
         results.to_csv(outfile)                                                 # Output LATE results to csv

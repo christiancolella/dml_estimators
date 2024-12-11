@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import doubleml as dml
+from scipy.stats import norm
 
 from dml_estimators.module import Module
 from sklearn.base import clone

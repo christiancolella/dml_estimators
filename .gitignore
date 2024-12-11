@@ -2,8 +2,6 @@ __pycache__/
 .venv/
 
 archive/
+resources/
 tests/
 test.py
-
-*.pdf
-*.whl
